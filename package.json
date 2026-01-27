@@ -20,7 +20,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json --sourceMap --inlineSources",
-    "prepare": "npm run build",
+    "prepare": "",
     "start:playground": "ts-node-dev --respawn playground/servers/server-stateful.ts",
     "start:fastify": "ts-node-dev --respawn playground/servers/server-stateful-fastify.ts",
     "start:oauth": "ts-node-dev --respawn playground/servers/server-oauth.ts",
