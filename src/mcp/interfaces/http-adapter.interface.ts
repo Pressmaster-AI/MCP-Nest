@@ -1,4 +1,16 @@
 /**
+ * Options for setting cookies
+ */
+export interface CookieOptions {
+  httpOnly?: boolean;
+  secure?: boolean;
+  maxAge?: number;
+  path?: string;
+  domain?: string;
+  sameSite?: 'strict' | 'lax' | 'none' | boolean;
+}
+
+/**
  * Generic HTTP request interface that abstracts Express and Fastify request objects
  */
 export interface HttpRequest {
@@ -12,6 +24,14 @@ export interface HttpRequest {
    * Get a header value by name (case-insensitive)
    */
   get?(name: string): string | undefined;
+  /**
+   * Parsed cookies from the request (requires cookie-parser for Express or @fastify/cookie for Fastify)
+   */
+  cookies?: Record<string, string | undefined>;
+  /**
+   * Get a cookie value by name
+   */
+  getCookie?(name: string): string | undefined;
   /**
    * Access to the raw framework-specific request object
    */
@@ -66,6 +86,21 @@ export interface HttpResponse {
    * Listen for events
    */
   on?(event: string, listener: (...args: any[]) => void): void;
+
+  /**
+   * Set a cookie on the response
+   */
+  setCookie?(name: string, value: string, options?: CookieOptions): void;
+
+  /**
+   * Clear a cookie from the response
+   */
+  clearCookie?(name: string, options?: CookieOptions): void;
+
+  /**
+   * Redirect to a URL
+   */
+  redirect?(url: string): void;
 
   /**
    * Access to the raw framework-specific response object

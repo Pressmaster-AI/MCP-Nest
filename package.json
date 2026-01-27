@@ -22,7 +22,9 @@
     "build": "tsc -p tsconfig.build.json --sourceMap --inlineSources",
     "prepare": "npm run build",
     "start:playground": "ts-node-dev --respawn playground/servers/server-stateful.ts",
-    "start:fastify": "ts-node-dev --respawn playground/servers/server-fastify.ts",
+    "start:fastify": "ts-node-dev --respawn playground/servers/server-stateful-fastify.ts",
+    "start:oauth": "ts-node-dev --respawn playground/servers/server-oauth.ts",
+    "start:oauth-fastify": "ts-node-dev --respawn playground/servers/server-oauth-fastify.ts",
     "start:multi-server": "ts-node-dev --respawn playground/servers/multi-server-example/main.ts",
     "test": "bun test src tests",
     "test:watch": "bun test src tests --watch",
@@ -36,6 +38,8 @@
     "@nestjs/jwt": "^11.0.0",
     "@nestjs/passport": "^11.0.5",
     "@nestjs/platform-fastify": "^11.1.5",
+    "@fastify/cookie": ">=9.0.0",
+    "@fastify/cors": ">=9.0.0",
     "@nestjs/typeorm": ">=9.0.0",
     "express": ">=4.0.0",
     "reflect-metadata": ">=0.1.14",
@@ -44,6 +48,12 @@
   },
   "peerDependenciesMeta": {
     "@nestjs/platform-fastify": {
+      "optional": true
+    },
+    "@fastify/cookie": {
+      "optional": true
+    },
+    "@fastify/cors": {
       "optional": true
     },
     "@nestjs/typeorm": {

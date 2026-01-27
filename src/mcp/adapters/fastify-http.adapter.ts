@@ -7,6 +7,8 @@ interface FastifyRequest {
   body: any;
   params: Record<string, string>;
   routeOptions?: any;
+  // From @fastify/cookie plugin
+  cookies?: Record<string, string>;
 }
 
 interface FastifyReply {
@@ -15,9 +17,16 @@ interface FastifyReply {
   header(name: string, value: string | string[]): this;
   sent: boolean;
   raw: any;
+  // From @fastify/cookie plugin
+  setCookie?(name: string, value: string, options?: any): this;
+  clearCookie?(name: string, options?: any): this;
+  // Built-in redirect
+  redirect(statusCode: number, url: string): this;
+  redirect(url: string): this;
 }
 
 import {
+  CookieOptions,
   HttpAdapter,
   HttpRequest,
   HttpResponse,
@@ -28,6 +37,7 @@ import {
  */
 export class FastifyHttpAdapter implements HttpAdapter {
   adaptRequest(req: FastifyRequest): HttpRequest {
+    const cookies = req.cookies as Record<string, string | undefined> | undefined;
     return {
       url: req.url,
       method: req.method,
@@ -39,6 +49,8 @@ export class FastifyHttpAdapter implements HttpAdapter {
         const value = req.headers[name.toLowerCase()];
         return Array.isArray(value) ? value[0] : value;
       },
+      cookies,
+      getCookie: (name: string) => cookies?.[name],
       raw: (req as any).raw, // Raw Node.js IncomingMessage for MCP transport
     };
   }
@@ -74,6 +86,21 @@ export class FastifyHttpAdapter implements HttpAdapter {
       },
       on: (event: string, listener: (...args: any[]) => void) => {
         res.raw.on(event, listener);
+      },
+      setCookie: (name: string, value: string, options?: CookieOptions) => {
+        // @fastify/cookie provides setCookie method
+        if (res.setCookie) {
+          res.setCookie(name, value, options);
+        }
+      },
+      clearCookie: (name: string, options?: CookieOptions) => {
+        // @fastify/cookie provides clearCookie method
+        if (res.clearCookie) {
+          res.clearCookie(name, options);
+        }
+      },
+      redirect: (url: string) => {
+        res.redirect(302, url);
       },
       raw: res.raw, // Raw Node.js ServerResponse for MCP transport
     };

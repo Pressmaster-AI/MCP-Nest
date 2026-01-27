@@ -7,19 +7,15 @@ import {
   HttpCode,
   Inject,
   Logger,
-  Next,
   Post,
   Query,
   Req,
   Res,
 } from '@nestjs/common';
 import { createHash, randomBytes } from 'crypto';
-import type {
-  Request as ExpressRequest,
-  NextFunction,
-  Response,
-} from 'express';
 import passport from 'passport';
+import { HttpAdapterFactory } from '../mcp/adapters/http-adapter.factory';
+import type { HttpResponse } from '../mcp/interfaces/http-adapter.interface';
 import { normalizeEndpoint } from '../mcp/utils/normalize-endpoint';
 import type {
   OAuthEndpointConfiguration,
@@ -32,18 +28,30 @@ import { JwtTokenService, TokenPair } from './services/jwt-token.service';
 import { OAuthStrategyService } from './services/oauth-strategy.service';
 import type { IOAuthStore } from './stores/oauth-store.interface';
 
-interface OAuthCallbackRequest extends ExpressRequest {
+/**
+ * Platform-agnostic OAuth callback request interface
+ */
+interface OAuthCallbackRequest {
   user?: {
     profile: OAuthUserProfile;
     accessToken: string;
     provider: string;
   };
+  headers: Record<string, string | string[] | undefined>;
+  cookies?: Record<string, string | undefined>;
+  [key: string]: any;
 }
 
-// Add this interface to properly type the Express request with raw body
-interface RequestWithRawBody extends ExpressRequest {
+/**
+ * Platform-agnostic request interface with raw body support
+ */
+interface RequestWithRawBody {
+  headers: Record<string, string | string[] | undefined>;
+  body?: any;
   rawBody?: Buffer;
   textBody?: string;
+  cookies?: Record<string, string | undefined>;
+  [key: string]: any;
 }
 
 export function createMcpOAuthController(
@@ -151,22 +159,55 @@ export function createMcpOAuthController(
     }
 
     /**
-     * Middleware to capture raw body for form-encoded requests
+     * Platform-agnostic method to capture raw body for form-encoded requests
      * This is needed when bodyParser is disabled in the main app
+     * Works with both Express and Fastify
      */
-    captureRawBody(req: RequestWithRawBody, res: Response, next: NextFunction) {
-      if (
-        req.headers['content-type']?.includes(
-          'application/x-www-form-urlencoded',
-        )
-      ) {
+    async captureRawBodyAsync(req: RequestWithRawBody): Promise<void> {
+      const contentType = Array.isArray(req.headers['content-type'])
+        ? req.headers['content-type'][0]
+        : req.headers['content-type'];
+
+      if (!contentType?.includes('application/x-www-form-urlencoded')) {
+        return;
+      }
+
+      // Check if we already have the body parsed (Fastify or Express with body-parser)
+      if (req.body && typeof req.body === 'object' && Object.keys(req.body).length > 0) {
+        return;
+      }
+
+      // Check for Fastify raw body (from fastify-raw-body plugin)
+      if (req.rawBody) {
+        const bodyString = req.rawBody.toString('utf-8');
+        if (bodyString) {
+          req.textBody = bodyString;
+          const params = new URLSearchParams(bodyString);
+          const parsedBody: any = {};
+          for (const [key, value] of params.entries()) {
+            parsedBody[key] = value;
+          }
+          req.body = parsedBody;
+        }
+        return;
+      }
+
+      // Get the raw request object (works for both Express and Fastify)
+      const rawReq = req.raw || req;
+
+      // Check if the stream is readable
+      if (typeof rawReq.on !== 'function') {
+        return;
+      }
+
+      return new Promise<void>((resolve, reject) => {
         let rawBody = '';
 
-        req.on('data', (chunk: Buffer) => {
+        rawReq.on('data', (chunk: Buffer) => {
           rawBody += chunk.toString('utf-8');
         });
 
-        req.on('end', () => {
+        rawReq.on('end', () => {
           req.textBody = rawBody;
           // Also parse and set it as body for NestJS
           if (rawBody) {
@@ -175,18 +216,16 @@ export function createMcpOAuthController(
             for (const [key, value] of params.entries()) {
               parsedBody[key] = value;
             }
-            (req as any).body = parsedBody;
+            req.body = parsedBody;
           }
-          next();
+          resolve();
         });
 
-        req.on('error', (err) => {
+        rawReq.on('error', (err: Error) => {
           this.logger.error('Error reading request body:', err);
-          next(err);
+          reject(err);
         });
-      } else {
-        next();
-      }
+      });
     }
 
     @OptionalGet(
@@ -293,10 +332,8 @@ export function createMcpOAuthController(
     @Get(endpoints.authorize)
     async authorize(
       @Query() query: any,
-      @Req()
-      req: any,
-      @Res() res: Response,
-      @Next() next: NextFunction,
+      @Req() req: any,
+      @Res() res: any,
     ) {
       const {
         response_type,
@@ -349,64 +386,108 @@ export function createMcpOAuthController(
 
       await this.store.storeOAuthSession(sessionId, oauthSession);
 
+      // Use adapter for platform-agnostic cookie operations
+      const adapter = HttpAdapterFactory.getAdapter(req, res);
+      const adaptedReq = adapter.adaptRequest(req);
+      const adaptedRes = adapter.adaptResponse(res);
+
       // Set session cookie
-      res.cookie('oauth_session', sessionId, {
+      adaptedRes.setCookie?.('oauth_session', sessionId, {
         httpOnly: true,
         secure: this.isProduction,
         maxAge: this.options.oauthSessionExpiresIn,
       });
 
       // Store state for passport
-      res.cookie('oauth_state', sessionState, {
+      adaptedRes.setCookie?.('oauth_state', sessionState, {
         httpOnly: true,
         secure: this.isProduction,
         maxAge: this.options.oauthSessionExpiresIn,
       });
 
-      // Redirect to the provider's auth endpoint
-      passport.authenticate(this.strategyName, {
-        state: req.cookies?.oauth_state,
-      })(req, res, next);
+      // Get raw request/response for Passport.js (which expects raw objects)
+      const rawReq = adaptedReq.raw || req;
+      const rawRes = adaptedRes.raw || res;
+
+      // Redirect to the provider's auth endpoint using Promise wrapper
+      // This avoids the Express-specific next() middleware pattern
+      return new Promise<void>((resolve, reject) => {
+        passport.authenticate(this.strategyName, {
+          state: adaptedReq.getCookie?.('oauth_state') || adaptedReq.cookies?.oauth_state,
+        })(rawReq, rawRes, (err?: any) => {
+          if (err) {
+            reject(err);
+          } else {
+            resolve();
+          }
+        });
+      });
     }
 
     @Get(endpoints.callback)
-    handleProviderCallback(
+    async handleProviderCallback(
       @Req() req: OAuthCallbackRequest,
-      @Res() res: Response,
-      @Next() next: NextFunction,
+      @Res() res: any,
     ) {
-      // Use a custom callback to handle the authentication result
-      passport.authenticate(
-        this.strategyName,
-        { session: false },
-        async (err: any, user: any) => {
-          try {
-            if (err) {
-              this.logger.error('OAuth callback error:', err);
-              throw new BadRequestException('Authentication failed');
-            }
+      // Use adapter for platform-agnostic operations
+      const adapter = HttpAdapterFactory.getAdapter(req, res);
+      const adaptedReq = adapter.adaptRequest(req);
+      const adaptedRes = adapter.adaptResponse(res);
 
-            if (!user) {
-              throw new BadRequestException('Authentication failed');
-            }
+      // Get raw request/response for Passport.js
+      const rawReq = adaptedReq.raw || req;
+      const rawRes = adaptedRes.raw || res;
 
-            req.user = user;
-            await this.processAuthenticationSuccess(req, res);
-          } catch (error) {
-            next(error);
+      // Use Promise wrapper for Passport authentication
+      // This avoids the Express-specific next() middleware pattern
+      return new Promise<void>((resolve, reject) => {
+        passport.authenticate(
+          this.strategyName,
+          { session: false },
+          async (err: any, user: any) => {
+            try {
+              if (err) {
+                this.logger.error('OAuth callback error:', err);
+                reject(new BadRequestException('Authentication failed'));
+                return;
+              }
+
+              if (!user) {
+                reject(new BadRequestException('Authentication failed'));
+                return;
+              }
+
+              // Attach user to the original request for downstream processing
+              req.user = user;
+              // Also attach cookies from adapted request for platform-agnostic access
+              req.cookies = adaptedReq.cookies;
+
+              await this.processAuthenticationSuccess(req, res, adaptedRes);
+              resolve();
+            } catch (error) {
+              reject(error);
+            }
+          },
+        )(rawReq, rawRes, (err?: any) => {
+          if (err) {
+            reject(err);
           }
-        },
-      )(req, res, next);
+        });
+      });
     }
 
     async processAuthenticationSuccess(
       req: OAuthCallbackRequest,
-      res: Response,
+      res: any,
+      adaptedRes?: HttpResponse,
     ) {
       const user = req.user;
       if (!user) {
         throw new BadRequestException('Authentication failed');
       }
+
+      // Use adapted response if provided, otherwise create one
+      const httpResponse = adaptedRes || HttpAdapterFactory.getAdapter(req, res).adaptResponse(res);
 
       const sessionId = req.cookies?.oauth_session;
       if (!sessionId) {
@@ -430,16 +511,16 @@ export function createMcpOAuthController(
         user.profile,
       );
 
-      // Set JWT token as cookie for UI endpoints
-      res.cookie('auth_token', jwt, {
+      // Set JWT token as cookie for UI endpoints (platform-agnostic)
+      httpResponse.setCookie?.('auth_token', jwt, {
         httpOnly: true,
         secure: this.isProduction,
         maxAge: this.options.cookieMaxAge,
       });
 
-      // Clear temporary cookies
-      res.clearCookie('oauth_session');
-      res.clearCookie('oauth_state');
+      // Clear temporary cookies (platform-agnostic)
+      httpResponse.clearCookie?.('oauth_session');
+      httpResponse.clearCookie?.('oauth_state');
 
       // Persist user profile and get stable profile_id
       const user_profile_id = await this.store.upsertUserProfile(
@@ -474,7 +555,8 @@ export function createMcpOAuthController(
       // Clean up session
       await this.store.removeOAuthSession(sessionId);
 
-      res.redirect(redirectUrl.toString());
+      // Redirect using platform-agnostic method
+      httpResponse.redirect?.(redirectUrl.toString());
     }
 
     @Post(endpoints.token)
@@ -485,10 +567,14 @@ export function createMcpOAuthController(
     async exchangeToken(
       @Body() body: any,
       @Req() req: RequestWithRawBody,
-      @Res({ passthrough: true }) res: Response,
+      @Res({ passthrough: true }) res: any,
     ): Promise<TokenPair> {
-      // Apply middleware to capture raw body if needed
-      const isFormUrlEncoded = req.headers['content-type']?.includes(
+      // Get content type in a platform-agnostic way
+      const contentType = Array.isArray(req.headers['content-type'])
+        ? req.headers['content-type'][0]
+        : req.headers['content-type'];
+
+      const isFormUrlEncoded = contentType?.includes(
         'application/x-www-form-urlencoded',
       );
       const isBodyEmpty =
@@ -496,37 +582,13 @@ export function createMcpOAuthController(
         (typeof body === 'object' &&
           Object.keys(body as Record<string, unknown>).length === 0);
 
+      // Apply platform-agnostic raw body capture if needed
       if (isFormUrlEncoded && isBodyEmpty) {
-        return new Promise((resolve, reject) => {
-          this.captureRawBody(req, res, (err?: any) => {
-            if (err) {
-              reject(
-                err instanceof Error ? err : new Error(String(err ?? 'error')),
-              );
-              return;
-            }
-
-            // Avoid returning a Promise from the callback; use an IIFE
-            void (async () => {
-              try {
-                // Re-parse the body after middleware has captured it
-                const parsedBody = this.parseRequestBody(req.body || body, req);
-                const result = await this.processTokenExchange(parsedBody, req);
-                resolve(result);
-              } catch (error) {
-                reject(
-                  error instanceof Error
-                    ? error
-                    : new Error(String(error ?? 'error')),
-                );
-              }
-            })();
-          });
-        });
+        await this.captureRawBodyAsync(req);
       }
 
       // Body is already parsed, process directly
-      const parsedBody = this.parseRequestBody(body, req);
+      const parsedBody = this.parseRequestBody(req.body || body, req);
       return this.processTokenExchange(parsedBody, req);
     }
 
@@ -600,7 +662,12 @@ export function createMcpOAuthController(
       const parsedBody = this.parseRequestBody(body, req);
 
       // Try client_secret_basic first (Authorization header)
-      const authHeader = req.headers?.authorization;
+      // Handle both string and array headers (Fastify may return arrays)
+      const authHeaderRaw = req.headers?.authorization;
+      const authHeader = Array.isArray(authHeaderRaw)
+        ? authHeaderRaw[0]
+        : authHeaderRaw;
+
       if (authHeader && authHeader.startsWith('Basic ')) {
         const credentials = Buffer.from(authHeader.slice(6), 'base64').toString(
           'utf-8',

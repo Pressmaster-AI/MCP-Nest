@@ -1,5 +1,6 @@
 import type { Request, Response } from 'express';
 import {
+  CookieOptions,
   HttpAdapter,
   HttpRequest,
   HttpResponse,
@@ -10,6 +11,10 @@ import {
  */
 export class ExpressHttpAdapter implements HttpAdapter {
   adaptRequest(req: Request): HttpRequest {
+    // Type assertion for cookies - requires cookie-parser middleware
+    const cookies = (req as any).cookies as
+      | Record<string, string | undefined>
+      | undefined;
     return {
       url: req.url,
       method: req.method,
@@ -18,6 +23,8 @@ export class ExpressHttpAdapter implements HttpAdapter {
       body: req.body,
       params: req.params,
       get: (name: string) => req.get(name),
+      cookies,
+      getCookie: (name: string) => cookies?.[name],
       raw: req,
     };
   }
@@ -50,6 +57,15 @@ export class ExpressHttpAdapter implements HttpAdapter {
       },
       on: (event: string, listener: (...args: any[]) => void) => {
         res.on(event, listener);
+      },
+      setCookie: (name: string, value: string, options?: CookieOptions) => {
+        res.cookie(name, value, options || {});
+      },
+      clearCookie: (name: string, options?: CookieOptions) => {
+        res.clearCookie(name, options || {});
+      },
+      redirect: (url: string) => {
+        res.redirect(url);
       },
       raw: res,
     };

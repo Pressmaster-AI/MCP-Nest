@@ -7,13 +7,21 @@ import {
   Optional,
 } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
-import { Request } from 'express';
 import { JwtPayload, JwtTokenService } from '../services/jwt-token.service';
 import type { IOAuthStore } from '../stores/oauth-store.interface';
 import type { McpOptions } from '../../mcp';
 
-export interface AuthenticatedRequest extends Request {
-  user: JwtPayload;
+/**
+ * Platform-agnostic authenticated request interface
+ * Works with both Express and Fastify
+ */
+export interface AuthenticatedRequest {
+  headers: {
+    authorization?: string;
+    [key: string]: string | string[] | undefined;
+  };
+  user?: JwtPayload;
+  [key: string]: any;
 }
 
 @Injectable()
@@ -115,13 +123,19 @@ export class McpAuthJwtGuard implements CanActivate {
     return true;
   }
 
-  private extractTokenFromHeader(request: Request): string | undefined {
+  private extractTokenFromHeader(request: AuthenticatedRequest): string | undefined {
     const authHeader = request.headers.authorization;
     if (!authHeader) {
       return undefined;
     }
 
-    const [type, token] = authHeader.split(' ');
+    // Handle both string and array headers (Fastify may return arrays)
+    const headerValue = Array.isArray(authHeader) ? authHeader[0] : authHeader;
+    if (!headerValue) {
+      return undefined;
+    }
+
+    const [type, token] = headerValue.split(' ');
     return type === 'Bearer' ? token : undefined;
   }
 }
