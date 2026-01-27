@@ -202,11 +202,13 @@ function createMcpOAuthController(endpoints = {}, options, authModuleId) {
                 httpOnly: true,
                 secure: this.isProduction,
                 maxAge: this.options.oauthSessionExpiresIn,
+                path: '/',
             });
             adaptedRes.setCookie?.('oauth_state', sessionState, {
                 httpOnly: true,
                 secure: this.isProduction,
                 maxAge: this.options.oauthSessionExpiresIn,
+                path: '/',
             });
             const rawReq = adaptedReq.raw || req;
             const rawRes = adaptedRes.raw || res;
@@ -279,9 +281,10 @@ function createMcpOAuthController(endpoints = {}, options, authModuleId) {
                 httpOnly: true,
                 secure: this.isProduction,
                 maxAge: this.options.cookieMaxAge,
+                path: '/',
             });
-            httpResponse.clearCookie?.('oauth_session');
-            httpResponse.clearCookie?.('oauth_state');
+            httpResponse.clearCookie?.('oauth_session', { path: '/' });
+            httpResponse.clearCookie?.('oauth_state', { path: '/' });
             const user_profile_id = await this.store.upsertUserProfile(user.profile, user.provider);
             const authCode = (0, crypto_1.randomBytes)(32).toString('base64url');
             await this.store.storeAuthCode({

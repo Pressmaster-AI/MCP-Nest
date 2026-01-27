@@ -396,6 +396,7 @@ export function createMcpOAuthController(
         httpOnly: true,
         secure: this.isProduction,
         maxAge: this.options.oauthSessionExpiresIn,
+        path: '/',
       });
 
       // Store state for passport
@@ -403,6 +404,7 @@ export function createMcpOAuthController(
         httpOnly: true,
         secure: this.isProduction,
         maxAge: this.options.oauthSessionExpiresIn,
+        path: '/',
       });
 
       // Get raw request/response for Passport.js (which expects raw objects)
@@ -516,11 +518,13 @@ export function createMcpOAuthController(
         httpOnly: true,
         secure: this.isProduction,
         maxAge: this.options.cookieMaxAge,
+        path: '/',
       });
 
       // Clear temporary cookies (platform-agnostic)
-      httpResponse.clearCookie?.('oauth_session');
-      httpResponse.clearCookie?.('oauth_state');
+      // Path must match the path used when setting the cookies
+      httpResponse.clearCookie?.('oauth_session', { path: '/' });
+      httpResponse.clearCookie?.('oauth_state', { path: '/' });
 
       // Persist user profile and get stable profile_id
       const user_profile_id = await this.store.upsertUserProfile(
