@@ -415,9 +415,17 @@ export function createMcpOAuthController(
       // Redirect to the provider's auth endpoint using Promise wrapper
       // This avoids the Express-specific next() middleware pattern
       return new Promise<void>((resolve, reject) => {
-        passport.authenticate(this.strategyName, {
+        // Custom options including sessionId for consent flow
+        // (sessionId is needed because cookies aren't available until the next request)
+        const authenticateOptions = {
           state: adaptedReq.getCookie?.('oauth_state') || adaptedReq.cookies?.oauth_state,
-        })(rawReq, rawRes, (err?: any) => {
+          sessionId: sessionId,
+        } as Record<string, unknown>;
+
+        passport.authenticate(
+          this.strategyName,
+          authenticateOptions,
+        )(rawReq, rawRes, (err?: any) => {
           if (err) {
             reject(err);
           } else {
