@@ -386,30 +386,31 @@ export function createMcpOAuthController(
 
       await this.store.storeOAuthSession(sessionId, oauthSession);
 
-      // Use adapter for platform-agnostic cookie operations
+      // Use adapter for platform-agnostic operations
       const adapter = HttpAdapterFactory.getAdapter(req, res);
       const adaptedReq = adapter.adaptRequest(req);
       const adaptedRes = adapter.adaptResponse(res);
 
-      // Set session cookie
-      adaptedRes.setCookie?.('oauth_session', sessionId, {
-        httpOnly: true,
-        secure: this.isProduction,
-        maxAge: this.options.oauthSessionExpiresIn,
-        path: '/',
-      });
-
-      // Store state for passport
-      adaptedRes.setCookie?.('oauth_state', sessionState, {
-        httpOnly: true,
-        secure: this.isProduction,
-        maxAge: this.options.oauthSessionExpiresIn,
-        path: '/',
-      });
-
       // Get raw request/response for Passport.js (which expects raw objects)
       const rawReq = adaptedReq.raw || req;
       const rawRes = adaptedRes.raw || res;
+
+      // Build cookie strings with proper attributes
+      // We set cookies directly on the raw response to ensure they're sent
+      // even when Passport redirects using the raw response object
+      const cookieOptions = [
+        'HttpOnly',
+        this.isProduction ? 'Secure' : '',
+        `Max-Age=${Math.floor(this.options.oauthSessionExpiresIn / 1000)}`,
+        'Path=/',
+        'SameSite=Lax',
+      ].filter(Boolean).join('; ');
+
+      const sessionCookie = `oauth_session=${sessionId}; ${cookieOptions}`;
+      const stateCookie = `oauth_state=${sessionState}; ${cookieOptions}`;
+
+      // Set cookies directly on raw response to ensure they're included in Passport's redirect
+      rawRes.setHeader('Set-Cookie', [sessionCookie, stateCookie]);
 
       // Redirect to the provider's auth endpoint using Promise wrapper
       // This avoids the Express-specific next() middleware pattern

@@ -198,20 +198,18 @@ function createMcpOAuthController(endpoints = {}, options, authModuleId) {
             const adapter = http_adapter_factory_1.HttpAdapterFactory.getAdapter(req, res);
             const adaptedReq = adapter.adaptRequest(req);
             const adaptedRes = adapter.adaptResponse(res);
-            adaptedRes.setCookie?.('oauth_session', sessionId, {
-                httpOnly: true,
-                secure: this.isProduction,
-                maxAge: this.options.oauthSessionExpiresIn,
-                path: '/',
-            });
-            adaptedRes.setCookie?.('oauth_state', sessionState, {
-                httpOnly: true,
-                secure: this.isProduction,
-                maxAge: this.options.oauthSessionExpiresIn,
-                path: '/',
-            });
             const rawReq = adaptedReq.raw || req;
             const rawRes = adaptedRes.raw || res;
+            const cookieOptions = [
+                'HttpOnly',
+                this.isProduction ? 'Secure' : '',
+                `Max-Age=${Math.floor(this.options.oauthSessionExpiresIn / 1000)}`,
+                'Path=/',
+                'SameSite=Lax',
+            ].filter(Boolean).join('; ');
+            const sessionCookie = `oauth_session=${sessionId}; ${cookieOptions}`;
+            const stateCookie = `oauth_state=${sessionState}; ${cookieOptions}`;
+            rawRes.setHeader('Set-Cookie', [sessionCookie, stateCookie]);
             return new Promise((resolve, reject) => {
                 passport_1.default.authenticate(this.strategyName, {
                     state: adaptedReq.getCookie?.('oauth_state') || adaptedReq.cookies?.oauth_state,
