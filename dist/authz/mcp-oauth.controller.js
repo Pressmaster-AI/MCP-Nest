@@ -211,9 +211,11 @@ function createMcpOAuthController(endpoints = {}, options, authModuleId) {
             const stateCookie = `oauth_state=${sessionState}; ${cookieOptions}`;
             rawRes.setHeader('Set-Cookie', [sessionCookie, stateCookie]);
             return new Promise((resolve, reject) => {
-                passport_1.default.authenticate(this.strategyName, {
+                const authenticateOptions = {
                     state: adaptedReq.getCookie?.('oauth_state') || adaptedReq.cookies?.oauth_state,
-                })(rawReq, rawRes, (err) => {
+                    sessionId: sessionId,
+                };
+                passport_1.default.authenticate(this.strategyName, authenticateOptions)(rawReq, rawRes, (err) => {
                     if (err) {
                         reject(err);
                     }
