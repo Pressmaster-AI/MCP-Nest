@@ -15,6 +15,10 @@
 
 - [Advanced Server Pattern](../playground/servers/advanced/README.md) — Direct service usage with custom controllers for maximum control over interceptors, guards, middleware, and endpoint configuration.
 
+### Deployment
+
+- [Production Deployment Guide](./deployment.md) — Deploy to Docker, Kubernetes, AWS, GCP, Azure, Railway, and more with security best practices.
+
 ### OAuth & Authorization
 
 - [Built-in Authorization Server](./built-in-authorization-server.md) — Using the built-in Authorization Server for simpler setups.
